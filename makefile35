@@ -1,0 +1,4 @@
+ARCH=sm_35
+HOST_COMP=mpicc
+all:
+	nvcc -arch=$(ARCH) -ccbin $(HOST_COMP) cuda.cu -o cuda35
