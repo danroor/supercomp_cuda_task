@@ -1,4 +1,4 @@
 ARCH=sm_60
-HOST_COMP=mpicc
+HOST_COMP=mpic++
 all:
-	nvcc -arch=$(ARCH) -ccbin $(HOST_COMP) -lstdc++ cuda.cu -o cuda60
+	nvcc -arch=$(ARCH) -ccbin $(HOST_COMP) cuda.cu -o cuda60
