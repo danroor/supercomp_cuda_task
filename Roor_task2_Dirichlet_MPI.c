@@ -384,6 +384,10 @@ void exchange_borders_with_neighbors(double **grid, int M, int N, int left, int 
 int main(int argc, char *argv[])
 {
 
+	// инициализация работы программы
+	struct timeval start, end;
+	gettimeofday(&start, NULL);
+
 	if (argc < 3) {
 		printf("Неверные параметры сетки\n");
 		return 0;
@@ -413,10 +417,29 @@ int main(int argc, char *argv[])
 		N = N * 10 + digit;
 	}	
 
-	int print_result = 0;
+	int print_result = 0, print_loop_cpy_exch_time = 0, limit_iter = 0;
 
 	if (argc > 3 && strlen(argv[3]) == 1 && argv[3][0] == '1') {
 		print_result = 1;
+	}
+
+	if (argc > 4 && strlen(argv[4]) == 1 && argv[4][0] == '1') {
+		print_loop_cpy_exch_time = 1;
+	}
+
+	if (argc > 5) {
+		for (int i = 0; i < strlen(argv[5]); ++i) {
+			// char digit to one-digit number
+			digit = argv[5][i] - '0';
+			if (digit < 0 || digit > 9) {
+				printf("Неверный ограничитель итераций\n");
+				return 0;		
+			}
+
+			limit_iter = limit_iter * 10 + digit;
+		}	
+	} else {
+		limit_iter = -1;
 	}
 
 	printf("M = %d, N = %d\n", M, N);
@@ -547,12 +570,6 @@ int main(int argc, char *argv[])
 		// Чередуем разбиения вертикалью и горизонталью
 		split_x = !split_x;
 	}
- 
-	// замеряем непосредственно вычисления по задаче Дирихле
-	// поэтому ставим точку отсчета здесь
-
-	struct timeval start, end;
-	gettimeofday(&start, NULL);
 
 	// прямоугольник 
 	double A1 = -3, B1 = 3, A2 = 0, B2 = 3;
@@ -601,24 +618,41 @@ int main(int argc, char *argv[])
 	M = imax + 1;
 	N = jmax + 1;
 
-	double **a = a_cmp(w1, w2, M, N, h1, h2), 
-	       **b = b_cmp(w1, w2, M, N, h1, h2), 
-		   **F = F_cmp(w1, w2, M, N, h1, h2);
-
 	double tau,
 	       local_dot, local_sqnorm,
 		   global_dot, global_sqnorm,
-	       delta = 0.000001;
+	       // delta = 0.000001;
+	       delta = 1e-15;
 
 	// будем проверять не ||w^(k+1) - w^k|| < delta
 	// а ||w^(k+1) - w^k||^2 < delta^2
 	delta *= delta;
 
+	double elapsed_time,
+	       loop_total_time = 0,
+	       exch_total_time = 0,
+	       elapsed_time_main = 0;
+
+	// инициализация работы программы
+	gettimeofday(&end, NULL);
+	double elapsed_time_init = end.tv_sec - start.tv_sec + (end.tv_usec - start.tv_usec) / 1000000.0;
+	// основная часть
+	struct timeval start_mpi, end_mpi, start_loop, end_loop;
+	gettimeofday(&start, NULL);
+
+	double **a = a_cmp(w1, w2, M, N, h1, h2), 
+	       **b = b_cmp(w1, w2, M, N, h1, h2), 
+		   **F = F_cmp(w1, w2, M, N, h1, h2);
+
+	int iter = 0;
 	do {
 		// для экономии памяти не создаем переменные под промежуточные
 		// матрицы при расчетах
 		// Aw^k is written to Ar
 
+		if (print_loop_cpy_exch_time) {
+			gettimeofday(&start_loop, NULL);
+		}
 
 		// на первой итерации везде нулевое начальное приближение
 		// получать граничные значения w от соседей не нужно
@@ -629,10 +663,32 @@ int main(int argc, char *argv[])
 		matr_diff(r, // result
 			      Ar, F, M, N);
 
+		if (print_loop_cpy_exch_time) {
+			gettimeofday(&end_loop, NULL);
+			elapsed_time = end_loop.tv_sec - start_loop.tv_sec + (end_loop.tv_usec - start_loop.tv_usec) / 1000000.0;
+			loop_total_time += elapsed_time;
+		}
+
+
+		if (print_loop_cpy_exch_time) {
+			gettimeofday(&start_mpi, NULL);
+		}
+
 		// Оператор А берет элементы невязки из соседней области,
 		// обсчитываемой другим процессом
 		// нужно обменяться граничными значениями с соседями
 		exchange_borders_with_neighbors(r, M, N, left, right, up, down, rank);
+
+
+		if (print_loop_cpy_exch_time) {
+			gettimeofday(&end_mpi, NULL);
+			elapsed_time = end_mpi.tv_sec - start_mpi.tv_sec + (end_mpi.tv_usec - start_mpi.tv_usec) / 1000000.0;
+			exch_total_time += elapsed_time;
+		}
+
+		if (print_loop_cpy_exch_time) {
+			gettimeofday(&start_loop, NULL);
+		}
 
 		// compute Ar^k
 		Aw_cmp(Ar, r, a, b, M, N, h1, h2);
@@ -640,9 +696,28 @@ int main(int argc, char *argv[])
 		local_dot = dot(Ar, r, M, N, h1, h2);
 		local_sqnorm = sqnorm(Ar, M, N, h1, h2);
 		
+		if (print_loop_cpy_exch_time) {
+			gettimeofday(&end_loop, NULL);
+			elapsed_time = end_loop.tv_sec - start_loop.tv_sec + (end_loop.tv_usec - start_loop.tv_usec) / 1000000.0;
+			loop_total_time += elapsed_time;
+		}
+
+		if (print_loop_cpy_exch_time) {
+			gettimeofday(&start_mpi, NULL);
+		}
 
 		MPI_Allreduce(&local_dot, &global_dot, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
 		MPI_Allreduce(&local_sqnorm, &global_sqnorm, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+
+		if (print_loop_cpy_exch_time) {
+			gettimeofday(&end_mpi, NULL);
+			elapsed_time = end_mpi.tv_sec - start_mpi.tv_sec + (end_mpi.tv_usec - start_mpi.tv_usec) / 1000000.0;
+			exch_total_time += elapsed_time;
+		}
+
+		if (print_loop_cpy_exch_time) {
+			gettimeofday(&start_loop, NULL);
+		}
 
 		tau =  global_dot / global_sqnorm;
 		
@@ -663,6 +738,17 @@ int main(int argc, char *argv[])
 
 		// ||w^(k+1) - w^k||^2
 		local_sqnorm = sqnorm(r, M, N, h1, h2);
+
+		if (print_loop_cpy_exch_time) {
+			gettimeofday(&end_loop, NULL);
+			elapsed_time = end_loop.tv_sec - start_loop.tv_sec + (end_loop.tv_usec - start_loop.tv_usec) / 1000000.0;
+			loop_total_time += elapsed_time;
+		}
+
+		if (print_loop_cpy_exch_time) {
+			gettimeofday(&start_mpi, NULL);
+		}		
+
 		MPI_Allreduce(&local_sqnorm, &global_sqnorm, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
 
 		// Оператор Аw берет элементы невязки из соседней области,
@@ -670,19 +756,34 @@ int main(int argc, char *argv[])
 		// нужно обменяться граничными значениями сеточной функции с соседями
 		exchange_borders_with_neighbors(w_prev, M, N, left, right, up, down, rank);
 
+		if (print_loop_cpy_exch_time) {
+			gettimeofday(&end_mpi, NULL);
+			elapsed_time = end_mpi.tv_sec - start_mpi.tv_sec + (end_mpi.tv_usec - start_mpi.tv_usec) / 1000000.0;
+			exch_total_time += elapsed_time;
+		}
+
+		++iter;
+
+		if (limit_iter != -1 && iter == limit_iter) {
+			printf("Stopped after %d iterations\n", iter);
+			break;
+		}
+
+		gettimeofday(&end, NULL);
+		elapsed_time_main = end.tv_sec - start.tv_sec + (end.tv_usec - start.tv_usec) / 1000000.0;
+		if (elapsed_time_main > 300) {
+			printf("Stopped after %.6f seconds and %d iterations\n", elapsed_time_main, iter);
+			break;
+		}
 	}
 	while (global_sqnorm >= delta);
 
+	// основная часть
 	gettimeofday(&end, NULL);
+	elapsed_time_main = end.tv_sec - start.tv_sec + (end.tv_usec - start.tv_usec) / 1000000.0;
 
-	printf("Процесс %d успешно отработал за %.8f секунд (gettimeofday)\n\n", rank,
-			end.tv_sec - start.tv_sec + (end.tv_usec - start.tv_usec) / 1000000.0);
-
-	// проверим корректность вычислений по левому верхнему домену
-	if (print_result && left == -1 && up == -1) {
-		printf("Значения точек сетки (первая строка и первый столбец) и сеточной функции:\n\n");
-		print_net_function(w_prev, w1, w2, M, N);
-	}
+	// завершение работы
+	gettimeofday(&start, NULL);
 
 	free_a(a, M, N);
 	free_b(b, M, N);
@@ -697,9 +798,60 @@ int main(int argc, char *argv[])
 		free(Ar[i]);
 	}
 
-	free(w_prev);
+	if (!print_result) {
+		free(w_prev);
+	}
 	free(r);
 	free(Ar);
+
+	// завершение работы
+	gettimeofday(&end, NULL);
+	double elapsed_time_end = end.tv_sec - start.tv_sec + (end.tv_usec - start.tv_usec) / 1000000.0;
+
+
+	// упорядоченный вывод результата всеми процессами от 0 до size-1
+	MPI_Status stat;
+
+	if (rank > 0) {
+		MPI_Recv(&local_dot, 1, MPI_INT, rank - 1, rank - 1, MPI_COMM_WORLD, &stat);
+	}
+
+	printf("Процесс %d из %d успешно отработал\nИнициализация: %.6f секунд \nОсновная часть: %.6f секунд \nЗавершение: %.6f секунд \n   Итого: %.6f \n",
+		    rank, size,
+		    elapsed_time_init,  elapsed_time_main,  elapsed_time_end,
+		    elapsed_time_init + elapsed_time_main + elapsed_time_end);
+
+	// не учитываем накладные расходы на создание событий для замера времени выполнения команд cuda
+	double real_time_main = loop_total_time + exch_total_time;
+
+	if (print_loop_cpy_exch_time) {
+		printf("Циклы: %.6f секунд, %.2f %% времени \nОбмены MPI: %.6f секунд, %.2f %% времени \n   Итого: %.6f",
+		    loop_total_time, loop_total_time * 100 / real_time_main,
+		    exch_total_time, exch_total_time * 100 / real_time_main,
+		    real_time_main);
+	}
+
+	// проверим корректность вычислений по левому верхнему домену
+	if (print_result && left == -1 && up == -1) {
+		printf("Значения точек сетки (первая строка и первый столбец) и сеточной функции:\n\n");
+		print_net_function(w_prev, w1, w2, M, N);
+	}
+
+	printf("##############\n\n");
+
+
+	if (print_result) {
+		free(w_prev);
+	}
+
+	// printf("Процесс %d успешно отработал за %.8f секунд (gettimeofday)\n\n", rank,
+	// 		end.tv_sec - start.tv_sec + (end.tv_usec - start.tv_usec) / 1000000.0);
+
+	// // проверим корректность вычислений по левому верхнему домену
+	// if (print_result && left == -1 && up == -1) {
+	// 	printf("Значения точек сетки (первая строка и первый столбец) и сеточной функции:\n\n");
+	// 	print_net_function(w_prev, w1, w2, M, N);
+	// }
 
 	MPI_Finalize();
 
