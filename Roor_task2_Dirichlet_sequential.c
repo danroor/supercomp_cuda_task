@@ -283,18 +283,18 @@ double sqnorm(double **u, int M, int N, double h1, double h2) {
 }
 
 void print_net_function(double **net, double *w1, double *w2, int M, int N) {
-	printf("%10.5f ", -1.0);
+	printf("%15.10f ", -1.0);
 
 	for (int i = 0; i <= M; ++i) {
-		printf("%10.5f ", w1[i]);
+		printf("%15.10f ", w1[i]);
 	}
 
 	printf("\n");
 
 	for (int j = 0; j <= N; ++j) {
-		printf("%10.5f ", w2[j]);
+		printf("%15.10f ", w2[j]);
 		for (int i = 0; i <= M; ++i) {
-			printf("%10.5f ", net[i][j]);
+			printf("%15.10f ", net[i][j]);
 		}
 		printf("\n");
 	}	
@@ -385,7 +385,12 @@ int main(int argc, char *argv[])
 	       **b = b_cmp(w1, w2, M, N, h1, h2), 
 		   **F = F_cmp(w1, w2, M, N, h1, h2);
 
-	double tau, delta = 0.000001;
+	double tau, 
+	       delta = 0.000001;
+
+	if (M >= 100 && N >= 100) {
+		delta = 1e-15;
+	}
 
 	// будем проверять не ||w^(k+1) - w^k|| < delta
 	// а ||w^(k+1) - w^k||^2 < delta^2
@@ -456,6 +461,8 @@ int main(int argc, char *argv[])
 		tau = sqnorm(r, M, N, h1, h2);
 		gettimeofday(&end_loop, NULL);
 		if (iter == 1) printf("first iter diff norm %.10f\n", end_loop.tv_sec - start_loop.tv_sec + (end_loop.tv_usec - start_loop.tv_usec) / 1000000.0);
+
+		printf("Current sqnorm %.35f\n", tau);
 	}
 	while (tau >= delta);
 

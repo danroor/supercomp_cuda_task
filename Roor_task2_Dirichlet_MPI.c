@@ -285,32 +285,28 @@ double sqnorm(double **u, int M, int N, double h1, double h2) {
 }
 
 void print_net_function(double **net, double *w1, double *w2, int M, int N) {
-	printf("%10.5f ", -1.0);
+	printf("%15.10f ", -1.0);
 
 	for (int i = 0; i <= M; ++i) {
-		printf("%10.5f ", w1[i]);
+		printf("%15.10f ", w1[i]);
 	}
 
 	printf("\n");
 
 	for (int j = 0; j <= N; ++j) {
-		printf("%10.5f ", w2[j]);
+		printf("%15.10f ", w2[j]);
 		for (int i = 0; i <= M; ++i) {
-			printf("%10.5f ", net[i][j]);
+			printf("%15.10f ", net[i][j]);
 		}
 		printf("\n");
 	}	
 }
 
-void exchange_borders_with_neighbors(double **grid, int M, int N, int left, int right, int up, int down, int rank) {
 
-	double *buf;
 
-	if (N > M) {
-		buf = calloc(N - 1, sizeof(double));
-	} else {
-		buf = calloc(M - 1, sizeof(double));
-	}  
+double *buf;
+
+void exchange_borders_with_neighbors(double **grid,  int M, int N, int left, int right, int up, int down, int rank) {
 	
 	MPI_Status stat;
 	int recv_count;
@@ -443,6 +439,13 @@ int main(int argc, char *argv[])
 	}
 
 	printf("M = %d, N = %d\n", M, N);
+
+	// для MPI обменов
+	if (N > M) {
+		buf = calloc(N - 1, sizeof(double));
+	} else {
+		buf = calloc(M - 1, sizeof(double));
+	} 
 
 	int rank,rank_cpy,
 	    size,size_cpy,
@@ -621,8 +624,11 @@ int main(int argc, char *argv[])
 	double tau,
 	       local_dot, local_sqnorm,
 		   global_dot, global_sqnorm,
-	       // delta = 0.000001;
-	       delta = 1e-15;
+	       delta = 0.000001;
+
+	if (M >= 100 && N >= 100) {
+		delta = 1e-15;
+	}
 
 	// будем проверять не ||w^(k+1) - w^k|| < delta
 	// а ||w^(k+1) - w^k||^2 < delta^2
@@ -775,6 +781,11 @@ int main(int argc, char *argv[])
 			printf("Stopped after %.6f seconds and %d iterations\n", elapsed_time_main, iter);
 			break;
 		}
+
+		if (rank == 0) {
+			printf("Current sqnorm %.35f\n", global_sqnorm);	
+		}
+		
 	}
 	while (global_sqnorm >= delta);
 
@@ -803,6 +814,8 @@ int main(int argc, char *argv[])
 	}
 	free(r);
 	free(Ar);
+
+	free(buf);
 
 	// завершение работы
 	gettimeofday(&end, NULL);
